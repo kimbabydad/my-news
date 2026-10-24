@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1a1a2e">
+<title>今日新闻聚合</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f6fa;
+    color: #1a1a2e;
+    padding-bottom: 20px;
+  }
+  /* 顶部栏 */
+  .header {
+    position: sticky; top: 0; z-index: 100;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: #fff;
+    padding: 14px 16px 10px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+  }
+  .header-top { display: flex; justify-content: space-between; align-items: center; }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .refresh-btn {
+    background: rgba(255,255,255,0.15); border: none; color: #fff;
+    padding: 6px 12px; border-radius: 16px; font-size: 13px; cursor: pointer;
+  }
+  .refresh-btn:active { background: rgba(255,255,255,0.3); }
+  .update-time { font-size: 11px; opacity: 0.7; margin-top: 4px; }
+
+  /* 分类 Tab */
+  .tabs {
+    display: flex; overflow-x: auto; white-space: nowrap;
+    background: #fff; padding: 8px 12px; gap: 8px;
+    position: sticky; top: 56px; z-index: 99;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    flex-shrink: 0; padding: 7px 16px; border-radius: 18px;
+    font-size: 14px; background: #f0f1f5; color: #555; cursor: pointer;
+    border: none; transition: all 0.2s;
+  }
+  .tab.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff; font-weight: 600;
+  }
+
+  /* 新闻列表 */
+  .news-list { padding: 12px; }
+  .card {
+    background: #fff; border-radius: 12px; padding: 14px;
+    margin-bottom: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    transition: transform 0.1s;
+  }
+  .card:active { transform: scale(0.98); }
+  .card-title {
+    font-size: 15px; font-weight: 600; line-height: 1.45;
+    margin-bottom: 8px; color: #1a1a2e;
+  }
+  .card-meta {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: #888; margin-bottom: 6px;
+  }
+  .card-meta .tag {
+    background: #eef0ff; color: #667eea; padding: 1px 7px;
+    border-radius: 8px; font-size: 10px;
+  }
+  .card-summary {
+    font-size: 13px; color: #666; line-height: 1.55;
+    display: -webkit-box; -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .card-footer {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid #f0f1f5;
+  }
+  .read-link {
+    color: #667eea; font-size: 13px; text-decoration: none;
+    font-weight: 500;
+  }
+  .fav-btn {
+    background: none; border: none; font-size: 18px; cursor: pointer;
+    color: #ccc;
+  }
+  .fav-btn.faved { color: #ff6b6b; }
+
+  /* 空状态 */
+  .empty { text-align: center; padding: 60px 20px; color: #999; font-size: 14px; }
+  .loading { text-align: center; padding: 40px; color: #999; }
+
+  /* 收藏切换 Tab 样式 */
+  .tab.fav-tab { margin-left: auto; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-top">
+    <h1>📰 今日新闻聚合</h1>
+    <button class="refresh-btn" onclick="loadData()">🔄 刷新</button>
+  </div>
+  <div class="update-time" id="updateTime">加载中...</div>
+</div>
+
+<div class="tabs" id="tabs"></div>
+
+<div class="news-list" id="newsList">
+  <div class="loading">正在加载新闻...</div>
+</div>
+
+<script>
+let allData = null;
+let currentCat = "hot";
+let favorites = JSON.parse(localStorage.getItem("news_fav") || "[]");
+
+const CATS = [
+  { key: "hot", name: "热点", icon: "🔥" },
+  { key: "tech", name: "AI科技", icon: "🤖" },
+  { key: "sports", name: "体育", icon: "⚽" },
+  { key: "music", name: "音乐", icon: "🎵" },
+  { key: "film", name: "影视", icon: "🎬" },
+];
+
+// 渲染分类 Tab
+function renderTabs() {
+  const tabs = document.getElementById("tabs");
+  let html = CATS.map(c =>
+    `<button class="tab ${c.key===currentCat?'active':''}" onclick="switchCat('${c.key}')">${c.icon} ${c.name}</button>`
+  ).join("");
+  html += `<button class="tab fav-tab ${currentCat==='fav'?'active':''}" onclick="switchCat('fav')">⭐ 收藏</button>`;
+  tabs.innerHTML = html;
+}
+
+function switchCat(key) {
+  currentCat = key;
+  renderTabs();
+  renderList();
+}
+
+// 渲染新闻列表
+function renderList() {
+  const list = document.getElementById("newsList");
+  let items = [];
+
+  if (currentCat === "fav") {
+    // 收藏列表
+    const favSet = new Set(favorites);
+    if (allData) {
+      for (const k in allData.categories) {
+        allData.categories[k].items.forEach(it => {
+          if (favSet.has(it.url || it.title)) items.push({...it, _cat: allData.categories[k].name});
+        });
+      }
+    }
+  } else if (allData && allData.categories[currentCat]) {
+    items = allData.categories[currentCat].items.map(it => ({...it, _cat: allData.categories[currentCat].name}));
+  }
+
+  if (items.length === 0) {
+    list.innerHTML = `<div class="empty">${currentCat==='fav'?'还没有收藏内容':'暂无新闻'}</div>`;
+    return;
+  }
+
+  list.innerHTML = items.map(it => {
+    const isFav = favorites.includes(it.url || it.title);
+    const metaParts = [it.source, it.time].filter(Boolean);
+    const meta = metaParts.length ? metaParts.join(" · ") : (it._cat || "");
+    const summary = it.summary || "点击「阅读原文」查看详情";
+    return `
+      <div class="card">
+        <div class="card-title">${escapeHtml(it.title)}</div>
+        <div class="card-meta">
+          ${it._cat ? `<span class="tag">${it._cat}</span>` : ''}
+          <span>${escapeHtml(meta)}</span>
+        </div>
+        <div class="card-summary">${escapeHtml(summary)}</div>
+        <div class="card-footer">
+          ${it.url ? `<a class="read-link" href="${it.url}" target="_blank" rel="noopener">阅读原文 →</a>` : '<span></span>'}
+          <button class="fav-btn ${isFav?'faved':''}" onclick="toggleFav('${(it.url||it.title).replace(/'/g,"\\'")}', this)">${isFav?'❤️':'🤍'}</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function escapeHtml(s) {
+  const div = document.createElement("div");
+  div.textContent = s || "";
+  return div.innerHTML;
+}
+
+function toggleFav(key, btn) {
+  const idx = favorites.indexOf(key);
+  if (idx >= 0) {
+    favorites.splice(idx, 1);
+    btn.classList.remove("faved");
+    btn.textContent = "🤍";
+  } else {
+    favorites.push(key);
+    btn.classList.add("faved");
+    btn.textContent = "❤️";
+  }
+  localStorage.setItem("news_fav", JSON.stringify(favorites));
+}
+
+// 加载数据
+async function loadData() {
+  document.getElementById("newsList").innerHTML = '<div class="loading">正在加载新闻...</div>';
+  try {
+    const res = await fetch("data.json?t=" + Date.now());
+    allData = await res.json();
+    document.getElementById("updateTime").textContent = "更新于 " + (allData.generated_at || "");
+    renderList();
+  } catch (e) {
+    document.getElementById("newsList").innerHTML =
+      '<div class="empty">加载失败，请检查网络后刷新</div>';
+  }
+}
+
+renderTabs();
+loadData();
+</script>
+</body>
+</html>
